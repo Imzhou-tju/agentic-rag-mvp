@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     llm_model: str = 'gpt-4o-mini'
     openai_api_key: str = ''
     openai_base_url: str = ''
+    
+    embedding_model: str = 'BAAI/bge-large-zh-v1.5'
+    embedding_api_key: str = ''
+    embedding_base_url: str = 'https://api.siliconflow.cn/v1'
 
     top_k: int = 4
     chunk_size: int = 700

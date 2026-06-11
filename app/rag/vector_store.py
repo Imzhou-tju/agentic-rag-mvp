@@ -1,23 +1,14 @@
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from langchain_chroma import Chroma
+from langchain_core.documents import Document
+from langchain_openai import OpenAIEmbeddings
 
 from app.core.config import get_settings
 from app.utils.text import chunk_text
-
-
-@dataclass
-class ChunkRecord:
-    chunk_id: str
-    document_name: str
-    text: str
 
 
 class SimpleVectorStore:
@@ -25,37 +16,34 @@ class SimpleVectorStore:
         self.settings = get_settings()
         self.index_dir = Path(self.settings.index_dir)
         self.index_dir.mkdir(parents=True, exist_ok=True)
-        self.vectorizer_path = self.index_dir / 'vectorizer.pkl'
-        self.records_path = self.index_dir / 'records.json'
-        self.matrix_path = self.index_dir / 'matrix.npy'
-        self.vectorizer: TfidfVectorizer | None = None
-        self.records: List[ChunkRecord] = []
-        self.matrix: np.ndarray | None = None
-        self._load()
-
-    def _load(self) -> None:
-        if self.records_path.exists():
-            import pickle
-            self.records = [ChunkRecord(**item) for item in json.loads(self.records_path.read_text(encoding='utf-8'))]
-            self.matrix = np.load(self.matrix_path)
-            with open(self.vectorizer_path, 'rb') as f:
-                self.vectorizer = pickle.load(f)
-
-    def _save(self) -> None:
-        import pickle
-            
-        self.records_path.write_text(
-            json.dumps([asdict(r) for r in self.records], ensure_ascii=False, indent=2),
-            encoding='utf-8',
+        
+        # Initialize SiliconFlow API based Embeddings
+        self.embeddings = OpenAIEmbeddings(
+            model=self.settings.embedding_model,
+            api_key=self.settings.embedding_api_key,
+            base_url=self.settings.embedding_base_url,
         )
-        if self.matrix is not None:
-            np.save(self.matrix_path, self.matrix)
-        if self.vectorizer is not None:
-            with open(self.vectorizer_path, 'wb') as f:
-                pickle.dump(self.vectorizer, f)
+        
+        # Initialize Chroma vector store
+        self.vector_store = Chroma(
+            collection_name="enterprise_knowledge",
+            embedding_function=self.embeddings,
+            persist_directory=str(self.index_dir)
+        )
 
     def rebuild_from_documents(self, documents: list[tuple[str, str]]) -> int:
-        records: List[ChunkRecord] = []
+        """Clear existing index and rebuild from new documents."""
+        # Clean existing collection
+        self.vector_store.delete_collection()
+        
+        # Recreate an empty collection
+        self.vector_store = Chroma(
+            collection_name="enterprise_knowledge",
+            embedding_function=self.embeddings,
+            persist_directory=str(self.index_dir)
+        )
+        
+        docs_to_add: List[Document] = []
         for doc_name, content in documents:
             chunks = chunk_text(
                 content,
@@ -63,26 +51,21 @@ class SimpleVectorStore:
                 chunk_overlap=self.settings.chunk_overlap,
             )
             for idx, chunk in enumerate(chunks):
-                records.append(
-                    ChunkRecord(
-                        chunk_id=f'{doc_name}::chunk_{idx}',
-                        document_name=doc_name,
-                        text=chunk,
-                    )
+                doc = Document(
+                    page_content=chunk,
+                    metadata={
+                        "document_name": doc_name,
+                        "chunk_index": idx,
+                        "chunk_id": f"{doc_name}::chunk_{idx}"
+                    }
                 )
-        self.records = records
-        if not self.records:
-            self.vectorizer = TfidfVectorizer()
-            self.matrix = np.empty((0, 0))
-            self._save()
+                docs_to_add.append(doc)
+                
+        if not docs_to_add:
             return 0
-
-        self.vectorizer = TfidfVectorizer(stop_words=None, ngram_range=(1, 2))
-        texts = [r.text for r in self.records]
-        sparse_matrix = self.vectorizer.fit_transform(texts)
-        self.matrix = sparse_matrix.toarray().astype(np.float32)
-        self._save()
-        return len(self.records)
+            
+        self.vector_store.add_documents(docs_to_add)
+        return len(docs_to_add)
 
     def add_documents_from_folder(self, folder: str) -> int:
         from app.rag.loader import DocumentLoader, SUPPORTED_EXTENSIONS
@@ -95,29 +78,46 @@ class SimpleVectorStore:
         return self.rebuild_from_documents(docs)
 
     def search(self, query: str, top_k: int | None = None) -> list[dict]:
-        if self.vectorizer is None or self.matrix is None or not self.records:
-            return []
         top_k = top_k or self.settings.top_k
-        q = self.vectorizer.transform([query]).toarray().astype(np.float32)
-        sims = cosine_similarity(q, self.matrix)[0]
-        idxs = np.argsort(sims)[::-1][:top_k]
-        results = []
-        for idx in idxs:
-            record = self.records[int(idx)]
-            results.append(
-                {
-                    'chunk_id': record.chunk_id,
-                    'document_name': record.document_name,
-                    'text': record.text,
-                    'score': float(sims[int(idx)]),
-                }
-            )
-        return results
+        
+        try:
+            # similarity_search_with_relevance_scores returns score between 0 and 1
+            # where 1 is highly similar, 0 is dissimilar
+            results = self.vector_store.similarity_search_with_relevance_scores(query, k=top_k)
+        except Exception:
+            # Fallback to standard distance search if relevance score is not supported by the metric
+            raw_results = self.vector_store.similarity_search_with_score(query, k=top_k)
+            # Chroma default L2 distance: lower is better. We invert it for a mock "score".
+            results = [(doc, max(0.0, 1.0 - score)) for doc, score in raw_results]
+
+        output = []
+        for doc, score in results:
+            output.append({
+                'chunk_id': doc.metadata.get('chunk_id', 'unknown'),
+                'document_name': doc.metadata.get('document_name', 'unknown'),
+                'text': doc.page_content,
+                'score': float(score),
+            })
+        return output
 
     def stats(self) -> dict:
-        docs = sorted({r.document_name for r in self.records})
-        return {
-            'total_documents': len(docs),
-            'total_chunks': len(self.records),
-            'documents': docs,
-        }
+        try:
+            collection = self.vector_store._collection
+            count = collection.count()
+            
+            # Extract unique documents if possible
+            results = collection.get(include=["metadatas"])
+            metadatas = results.get("metadatas", [])
+            docs = sorted({m.get("document_name") for m in metadatas if m and "document_name" in m})
+            
+            return {
+                'total_documents': len(docs),
+                'total_chunks': count,
+                'documents': docs,
+            }
+        except Exception:
+            return {
+                'total_documents': 0,
+                'total_chunks': 0,
+                'documents': [],
+            }

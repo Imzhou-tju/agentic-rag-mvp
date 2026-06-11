@@ -51,17 +51,32 @@ class SimpleVectorStore:
                 chunk_overlap=self.settings.chunk_overlap,
             )
             for idx, chunk in enumerate(chunks):
-                # Mock metadata injection for demonstration of filter
+                # Mock metadata injection for demonstration of filter and scoring
                 campus = None
                 if "卫津路" in doc_name or "卫津路" in chunk:
                     campus = "卫津路校区"
                 elif "北洋园" in doc_name or "北洋园" in chunk:
                     campus = "北洋园校区"
+                    
+                # Simulated feature scores
+                timeliness_score = 0.5
+                if "2025" in doc_name or "2026" in doc_name or "最新" in doc_name:
+                    timeliness_score = 1.0
+                elif "2020" in doc_name or "2021" in doc_name or "旧版" in doc_name:
+                    timeliness_score = 0.2
+                    
+                authoritative_score = 0.5
+                if "规定" in doc_name or "教务处" in doc_name or "官方" in doc_name or "章程" in doc_name:
+                    authoritative_score = 1.0
+                elif "论坛" in doc_name or "讨论" in doc_name or "经验" in doc_name:
+                    authoritative_score = 0.3
 
                 metadata = {
                     "document_name": doc_name,
                     "chunk_index": idx,
-                    "chunk_id": f"{doc_name}::chunk_{idx}"
+                    "chunk_id": f"{doc_name}::chunk_{idx}",
+                    "timeliness_score": float(timeliness_score),
+                    "authoritative_score": float(authoritative_score)
                 }
                 if campus:
                     metadata["campus"] = campus
@@ -108,6 +123,8 @@ class SimpleVectorStore:
                 'document_name': doc.metadata.get('document_name', 'unknown'),
                 'text': doc.page_content,
                 'score': float(score),
+                'timeliness_score': float(doc.metadata.get('timeliness_score', 0.5)),
+                'authoritative_score': float(doc.metadata.get('authoritative_score', 0.5))
             })
         return output
 

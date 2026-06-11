@@ -54,8 +54,35 @@ def retrieve_node(state: GraphState) -> dict:
     if analysis and analysis.campus:
         filter_dict = {"campus": analysis.campus}
         
-    docs = kb_service.search(query, filter_dict=filter_dict)
+    docs = kb_service.search(query, top_k=settings.initial_top_k, filter_dict=filter_dict)
     return {"documents": docs}
+
+def rerank_node(state: GraphState) -> dict:
+    """Rerank documents and apply feature weighting."""
+    query = state.get("rewritten_question") or state["question"]
+    documents = state["documents"]
+    
+    if not documents:
+        return {"documents": []}
+        
+    # 1. Get Cross-Encoder semantic scores
+    reranked_docs = kb_service.rerank(query, documents)
+    
+    # 2. Calculate Final Score fusing Reranker + Features
+    for doc in reranked_docs:
+        sem_score = doc.get("rerank_score", 0.0)
+        time_score = doc.get("timeliness_score", 0.5)
+        auth_score = doc.get("authoritative_score", 0.5)
+        
+        # weights: 0.6 semantic, 0.2 timeliness, 0.2 authority
+        final_score = 0.6 * sem_score + 0.2 * time_score + 0.2 * auth_score
+        doc["final_score"] = final_score
+        
+    # 3. Sort by final score descending and select top_k
+    sorted_docs = sorted(reranked_docs, key=lambda x: x.get("final_score", 0.0), reverse=True)
+    top_docs = sorted_docs[:settings.top_k]
+    
+    return {"documents": top_docs}
 
 def grade_documents_node(state: GraphState) -> dict:
     """Evaluate if retrieved documents are relevant to the question."""
@@ -179,6 +206,7 @@ workflow = StateGraph(GraphState)
 # Add nodes
 workflow.add_node("analyze_question_node", analyze_question_node)
 workflow.add_node("retrieve_node", retrieve_node)
+workflow.add_node("rerank_node", rerank_node)
 workflow.add_node("grade_documents_node", grade_documents_node)
 workflow.add_node("generate_node", generate_node)
 workflow.add_node("direct_generate_node", direct_generate_node)
@@ -188,7 +216,8 @@ workflow.add_node("rewrite_question_node", rewrite_question_node)
 workflow.add_edge(START, "analyze_question_node")
 workflow.add_conditional_edges("analyze_question_node", route_question)
 workflow.add_edge("direct_generate_node", END)
-workflow.add_edge("retrieve_node", "grade_documents_node")
+workflow.add_edge("retrieve_node", "rerank_node")
+workflow.add_edge("rerank_node", "grade_documents_node")
 workflow.add_conditional_edges("grade_documents_node", check_relevance)
 workflow.add_edge("rewrite_question_node", "retrieve_node")
 workflow.add_edge("generate_node", END)

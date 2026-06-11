@@ -60,6 +60,7 @@ def ask(req: AskRequest) -> AskResponse:
     initial_state = {
         "question": req.question,
         "task": req.task,
+        "analysis": None,
         "rewritten_question": "",
         "documents": [],
         "generation": "",
@@ -77,6 +78,10 @@ def ask(req: AskRequest) -> AskResponse:
         ) for doc in final_state.get("documents", [])
     ]
     
+    debug_info = {"final_docs_count": len(sources)}
+    if final_state.get("analysis"):
+        debug_info["analysis"] = final_state["analysis"].model_dump()
+    
     return AskResponse(
         question=final_state["question"],
         task=final_state["task"],
@@ -84,5 +89,5 @@ def ask(req: AskRequest) -> AskResponse:
         answer=final_state.get("generation", ""),
         sources=sources,
         rewritten_question=final_state.get("rewritten_question"),
-        debug={"final_docs_count": len(sources)}
+        debug=debug_info
     )

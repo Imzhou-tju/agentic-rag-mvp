@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
@@ -10,14 +10,15 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from app.agent.llm import SYSTEM_PROMPT as BASE_SYSTEM_PROMPT
-from app.agent.router import QueryRouter
+from app.agent.router import QueryAnalyzer
 from app.core.config import get_settings
+from app.models.schemas import QueryAnalysis
 from app.rag.service import KnowledgeBaseService
 
 # Initialize global services
 settings = get_settings()
 kb_service = KnowledgeBaseService()
-router = QueryRouter()
+analyzer = QueryAnalyzer()
 
 # Initialize LangChain ChatOpenAI for the LLM nodes
 llm = ChatOpenAI(
@@ -30,25 +31,30 @@ llm = ChatOpenAI(
 class GraphState(TypedDict):
     question: str
     task: str
+    analysis: Optional[QueryAnalysis]
     rewritten_question: str
     documents: List[dict]
     generation: str
     route: str
 
 # ---------------------------------------------------------
-# Pydantic Output Parsers for LLM calls
-# ---------------------------------------------------------
-class GradeResult(BaseModel):
-    """Boolean score for relevance check."""
-    score: str = Field(description="相关性得分，'yes' 表示相关，'no' 表示不相关")
-
-# ---------------------------------------------------------
 # Nodes
 # ---------------------------------------------------------
+def analyze_question_node(state: GraphState) -> dict:
+    """Analyze the question using LLM to extract intent and entities."""
+    analysis = analyzer.analyze(state["question"], state["task"])
+    return {"analysis": analysis}
+
 def retrieve_node(state: GraphState) -> dict:
     """Retrieve documents from vector store."""
     query = state.get("rewritten_question") or state["question"]
-    docs = kb_service.search(query)
+    analysis = state.get("analysis")
+    
+    filter_dict = None
+    if analysis and analysis.campus:
+        filter_dict = {"campus": analysis.campus}
+        
+    docs = kb_service.search(query, filter_dict=filter_dict)
     return {"documents": docs}
 
 def grade_documents_node(state: GraphState) -> dict:
@@ -56,15 +62,12 @@ def grade_documents_node(state: GraphState) -> dict:
     question = state["question"]
     documents = state["documents"]
     
-    # We use a structured prompt to ask LLM if the document is relevant
     system = "你是一个文档评分员，评估给定的文档片段是否与用户的问题相关。如果你认为它包含了回答问题所需的关键词或语义，请回复 'yes'，否则回复 'no'。只需输出 yes 或 no。"
     grade_prompt = ChatPromptTemplate.from_messages([
         ("system", system),
         ("human", "检索到的文档片段: \n\n {context} \n\n 用户问题: {question}")
     ])
     
-    # Enable structured output if supported, or just use regular generation
-    # Some models like DeepSeek support structured output well, but let's use standard generation and parse manually for maximum compatibility
     eval_chain = grade_prompt | llm
     
     filtered_docs = []
@@ -81,8 +84,8 @@ def generate_node(state: GraphState) -> dict:
     question = state["question"]
     task = state["task"]
     docs = state["documents"]
+    analysis = state.get("analysis")
     
-    # Build context similar to old workflow
     context = '\n\n'.join(
         [f"[来源: {r['document_name']} | 分数: {r.get('score', 0):.4f}]\n{r['text']}" for r in docs]
     )
@@ -96,7 +99,10 @@ def generate_node(state: GraphState) -> dict:
     else:
         instruction = '请基于以下文档片段回答问题，并在回答中体现依据。'
 
-    user_prompt = f"问题：{question}\n任务类型：{task}\n\n{instruction}\n\n文档片段：\n{context}"
+    # Inject intent context if available
+    intent_str = f"解析出的意图: {analysis.intent}\n" if analysis else ""
+
+    user_prompt = f"问题：{question}\n任务类型：{task}\n{intent_str}\n{instruction}\n\n文档片段：\n{context}"
     
     sys_prompt = (
         '你是一个企业知识库智能助手。回答时优先基于检索到的文档内容，'
@@ -128,8 +134,12 @@ def direct_generate_node(state: GraphState) -> dict:
 def rewrite_question_node(state: GraphState) -> dict:
     """Rewrite the question to get better retrieval results."""
     question = state["question"]
+    analysis = state.get("analysis")
+    entities_str = ", ".join(analysis.entities) if analysis and analysis.entities else ""
+    
     sys_prompt = (
-        "你是一个查询重写专家。用户的问题可能表述不清或难以在普通知识库中检索到相关结果。"
+        "你是一个查询重写专家。用户的问题可能表述不清或难以在普通知识库中检索到相关结果。\n"
+        f"已知提取的核心实体: {entities_str}\n"
         "请对用户的问题进行同义词扩展和重组，输出一个更适合向量检索的新问题。"
         "只输出重写后的问题，不要包含任何其他说明文字。"
     )
@@ -146,18 +156,16 @@ def rewrite_question_node(state: GraphState) -> dict:
 # Conditional Edges
 # ---------------------------------------------------------
 def route_question(state: GraphState) -> Literal["direct_generate_node", "retrieve_node"]:
-    """Route question to direct generation or retrieval."""
-    route, _ = router.route(state["question"], state["task"])
-    if route == "direct_answer":
+    """Route question to direct generation or retrieval based on analysis."""
+    analysis = state.get("analysis")
+    if analysis and not analysis.need_retrieval:
         return "direct_generate_node"
     return "retrieve_node"
 
 def check_relevance(state: GraphState) -> Literal["generate_node", "rewrite_question_node"]:
     """Determine whether to generate answer or rewrite question based on filtered docs."""
     filtered_docs = state["documents"]
-    # If no relevant documents found, rewrite and search again
     if not filtered_docs:
-        # Prevent infinite loops: if we already rewrote once, just generate with empty context to admit failure
         if state.get("rewritten_question"):
             return "generate_node"
         return "rewrite_question_node"
@@ -169,6 +177,7 @@ def check_relevance(state: GraphState) -> Literal["generate_node", "rewrite_ques
 workflow = StateGraph(GraphState)
 
 # Add nodes
+workflow.add_node("analyze_question_node", analyze_question_node)
 workflow.add_node("retrieve_node", retrieve_node)
 workflow.add_node("grade_documents_node", grade_documents_node)
 workflow.add_node("generate_node", generate_node)
@@ -176,7 +185,8 @@ workflow.add_node("direct_generate_node", direct_generate_node)
 workflow.add_node("rewrite_question_node", rewrite_question_node)
 
 # Add edges
-workflow.add_conditional_edges(START, route_question)
+workflow.add_edge(START, "analyze_question_node")
+workflow.add_conditional_edges("analyze_question_node", route_question)
 workflow.add_edge("direct_generate_node", END)
 workflow.add_edge("retrieve_node", "grade_documents_node")
 workflow.add_conditional_edges("grade_documents_node", check_relevance)

@@ -1,32 +1,48 @@
 from __future__ import annotations
 
-import re
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+
+from app.core.config import get_settings
+from app.models.schemas import QueryAnalysis
 
 
-RETRIEVAL_HINTS = [
-    '根据文档', '制度', '流程', '报销', '请假', '员工手册', '知识库', '上传', 'pdf',
-    '文档', '手册', '规定', '要求', '总结', '比较', '对比', '哪些', '什么是', '如何',
-]
+class QueryAnalyzer:
+    def __init__(self) -> None:
+        settings = get_settings()
+        self.llm = ChatOpenAI(
+            model=settings.llm_model,
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+            temperature=0.1,
+        )
+        # Use LangChain's structured output capability
+        self.analyzer = self.llm.with_structured_output(QueryAnalysis)
+        
+        self.system_prompt = (
+            "你是一个专业的企业知识库查询意图分析器。你的任务是分析用户的输入，提取关键信息以供下游检索系统使用。\n"
+            "1. intent: 判断用户意图。日常打招呼选 chitchat；询问规定、流程、事实选 knowledge_qa；总结任务选 summary；比较分析选 compare。\n"
+            "2. entities: 提取查询中的核心名词或动作作为关键词列表，用于辅助检索。\n"
+            "3. campus: 如果用户明确提到了某个校区（如'卫津路', '北洋园'），提取出来并规范化为'卫津路校区'或'北洋园校区'。如果没有，返回 null。\n"
+            "4. need_retrieval: 判断该问题是否需要查阅企业内部文档。纯闲聊(chitchat)设为 False，业务问题设为 True。"
+        )
 
-
-class QueryRouter:
-    def route(self, question: str, task: str) -> tuple[str, str | None]:
-        q = question.strip()
-        if task in {'summary', 'key_points', 'compare'}:
-            return 'retrieve_then_generate', self.rewrite(q, task)
-        if len(q) > 18:
-            return 'retrieve_then_generate', self.rewrite(q, task)
-        if any(hint in q.lower() for hint in [h.lower() for h in RETRIEVAL_HINTS]):
-            return 'retrieve_then_generate', self.rewrite(q, task)
-        if re.search(r'\d|第[一二三四五六七八九十]+', q):
-            return 'retrieve_then_generate', self.rewrite(q, task)
-        return 'direct_answer', None
-
-    def rewrite(self, question: str, task: str) -> str:
-        if task == 'summary':
-            return f'请检索与以下主题最相关的文档并总结：{question}'
-        if task == 'key_points':
-            return f'请检索与以下问题相关的关键条款和要点：{question}'
-        if task == 'compare':
-            return f'请检索与以下比较任务相关的内容并进行对比：{question}'
-        return question
+    def analyze(self, question: str, task: str = "qa") -> QueryAnalysis:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", self.system_prompt),
+            ("human", "当前UI指定任务类型: {task}\n用户问题: {question}")
+        ])
+        chain = prompt | self.analyzer
+        
+        try:
+            result = chain.invoke({"task": task, "question": question})
+            return result
+        except Exception as e:
+            # Fallback if structured output fails (e.g. model incompatibility)
+            print(f"Structured output failed: {e}. Falling back to default.")
+            return QueryAnalysis(
+                intent="knowledge_qa",
+                entities=[question],
+                campus=None,
+                need_retrieval=True
+            )

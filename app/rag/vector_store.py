@@ -51,13 +51,24 @@ class SimpleVectorStore:
                 chunk_overlap=self.settings.chunk_overlap,
             )
             for idx, chunk in enumerate(chunks):
+                # Mock metadata injection for demonstration of filter
+                campus = None
+                if "卫津路" in doc_name or "卫津路" in chunk:
+                    campus = "卫津路校区"
+                elif "北洋园" in doc_name or "北洋园" in chunk:
+                    campus = "北洋园校区"
+
+                metadata = {
+                    "document_name": doc_name,
+                    "chunk_index": idx,
+                    "chunk_id": f"{doc_name}::chunk_{idx}"
+                }
+                if campus:
+                    metadata["campus"] = campus
+
                 doc = Document(
                     page_content=chunk,
-                    metadata={
-                        "document_name": doc_name,
-                        "chunk_index": idx,
-                        "chunk_id": f"{doc_name}::chunk_{idx}"
-                    }
+                    metadata=metadata
                 )
                 docs_to_add.append(doc)
                 
@@ -77,16 +88,16 @@ class SimpleVectorStore:
                 docs.append((path.name, loader.load(str(path))))
         return self.rebuild_from_documents(docs)
 
-    def search(self, query: str, top_k: int | None = None) -> list[dict]:
+    def search(self, query: str, top_k: int | None = None, filter_dict: dict | None = None) -> list[dict]:
         top_k = top_k or self.settings.top_k
         
         try:
             # similarity_search_with_relevance_scores returns score between 0 and 1
             # where 1 is highly similar, 0 is dissimilar
-            results = self.vector_store.similarity_search_with_relevance_scores(query, k=top_k)
+            results = self.vector_store.similarity_search_with_relevance_scores(query, k=top_k, filter=filter_dict)
         except Exception:
             # Fallback to standard distance search if relevance score is not supported by the metric
-            raw_results = self.vector_store.similarity_search_with_score(query, k=top_k)
+            raw_results = self.vector_store.similarity_search_with_score(query, k=top_k, filter=filter_dict)
             # Chroma default L2 distance: lower is better. We invert it for a mock "score".
             results = [(doc, max(0.0, 1.0 - score)) for doc, score in raw_results]
 

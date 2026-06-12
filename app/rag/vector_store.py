@@ -22,6 +22,7 @@ class SimpleVectorStore:
             model=self.settings.embedding_model,
             api_key=self.settings.embedding_api_key,
             base_url=self.settings.embedding_base_url,
+            check_embedding_ctx_length=False
         )
         
         # Initialize Chroma vector store

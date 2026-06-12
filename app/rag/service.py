@@ -35,7 +35,7 @@ class KnowledgeBaseService:
         payload = {
             "model": self.settings.reranker_model,
             "query": query,
-            "texts": texts,
+            "documents": texts,
             "return_documents": False
         }
         

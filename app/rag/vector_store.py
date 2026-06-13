@@ -10,6 +10,8 @@ from langchain_openai import OpenAIEmbeddings
 from app.core.config import get_settings
 from app.utils.text import chunk_text
 
+import jieba
+from rank_bm25 import BM25Okapi
 
 class SimpleVectorStore:
     def __init__(self) -> None:
@@ -32,6 +34,9 @@ class SimpleVectorStore:
             embedding_function=self.embeddings,
             persist_directory=str(self.index_dir)
         )
+        
+        self.bm25 = None
+        self.bm25_docs = []
 
     def rebuild_from_documents(self, documents: list[tuple[str, str]]) -> int:
         """Clear existing index and rebuild from new documents."""
@@ -106,6 +111,12 @@ class SimpleVectorStore:
             return 0
             
         self.vector_store.add_documents(valid_docs)
+        
+        self.bm25_docs = valid_docs
+        tokenized_corpus = [list(jieba.cut(doc.page_content)) for doc in valid_docs]
+        if tokenized_corpus:
+            self.bm25 = BM25Okapi(tokenized_corpus)
+            
         return len(valid_docs)
 
     def add_documents_from_folder(self, folder: str) -> int:
@@ -133,6 +144,37 @@ class SimpleVectorStore:
 
         output = []
         for doc, score in results:
+            output.append({
+                'chunk_id': doc.metadata.get('chunk_id', 'unknown'),
+                'document_name': doc.metadata.get('document_name', 'unknown'),
+                'text': doc.page_content,
+                'score': float(score),
+                'timeliness_score': float(doc.metadata.get('timeliness_score', 0.5)),
+                'authoritative_score': float(doc.metadata.get('authoritative_score', 0.5))
+            })
+        return output
+
+    def bm25_search(self, query: str, top_k: int | None = None, filter_dict: dict | None = None) -> list[dict]:
+        top_k = top_k or self.settings.top_k
+        if not self.bm25 or not self.bm25_docs:
+            return []
+            
+        tokenized_query = list(jieba.cut(query))
+        scores = self.bm25.get_scores(tokenized_query)
+        
+        import numpy as np
+        top_indices = np.argsort(scores)[::-1][:top_k]
+        
+        output = []
+        for idx in top_indices:
+            score = scores[idx]
+            if score <= 0:
+                continue
+            doc = self.bm25_docs[idx]
+            if filter_dict and "campus" in filter_dict:
+                if doc.metadata.get("campus") != filter_dict["campus"]:
+                    continue
+                    
             output.append({
                 'chunk_id': doc.metadata.get('chunk_id', 'unknown'),
                 'document_name': doc.metadata.get('document_name', 'unknown'),

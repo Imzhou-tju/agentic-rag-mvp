@@ -74,23 +74,32 @@ class KnowledgeBaseService:
         all_queries = [query] + variations + rule_variations
         # 去重
         all_queries = list(dict.fromkeys(all_queries))
-        print(f"[Multi-Query] 并行检索查询列表: {all_queries}")
+        print(f"[Hybrid Search] 双引擎多查询列表: {all_queries}")
         
-        merged_results = {}
         search_top_k = top_k if top_k else self.settings.top_k
+        all_ranked_lists = []
         
         for q in all_queries:
-            results = self.store.search(q, top_k=search_top_k, filter_dict=filter_dict)
-            for res in results:
-                doc_id = res.get('id')
+            vec_results = self.store.search(q, top_k=search_top_k, filter_dict=filter_dict)
+            bm25_results = self.store.bm25_search(q, top_k=search_top_k, filter_dict=filter_dict)
+            if vec_results:
+                all_ranked_lists.append(vec_results)
+            if bm25_results:
+                all_ranked_lists.append(bm25_results)
+                
+        rrf_k = 60
+        merged_results = {}
+        for ranked_list in all_ranked_lists:
+            for rank, res in enumerate(ranked_list):
+                doc_id = res.get('chunk_id')
                 if doc_id not in merged_results:
-                    merged_results[doc_id] = res
-                else:
-                    if res.get('score', 0) > merged_results[doc_id].get('score', 0):
-                        merged_results[doc_id]['score'] = res['score']
-                        
+                    merged_results[doc_id] = res.copy()
+                    merged_results[doc_id]['rrf_score'] = 0.0
+                
+                merged_results[doc_id]['rrf_score'] += 1.0 / (rrf_k + rank + 1)
+                
         final_list = list(merged_results.values())
-        final_list = sorted(final_list, key=lambda x: x.get('score', 0), reverse=True)
+        final_list = sorted(final_list, key=lambda x: x.get('rrf_score', 0), reverse=True)
         return final_list[:search_top_k * 2]
 
     def rerank(self, query: str, documents: list[dict]) -> list[dict]:

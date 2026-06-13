@@ -29,18 +29,21 @@ llm = ChatOpenAI(
 # Tools
 # ---------------------------------------------------------
 @tool
-def search_knowledge_base(query: str) -> str:
+def search_knowledge_base(query: str, campus: Optional[Literal["卫津路校区", "北洋园校区"]] = None) -> str:
     """在企业知识库中检索与用户问题相关的官方文档。
     如果用户问及任何校园、公司规定、指南、报销、选课、假期等业务问题，必须调用此工具。
     
     参数:
     query (str): 用于检索的关键词或搜索语句。
+    campus (str, 可选): 如果用户问题中明确提到了特定校区（包括老校区、新校区等别称），必须提取并标准化为 "卫津路校区" 或 "北洋园校区" 传入此参数，以进行精准的元数据过滤。
     
     返回:
     包含多个相关文档片段的合并字符串，带有权重和出处。
     """
+    filter_dict = {"campus": campus} if campus else None
+    
     # 1. Retrieve initial documents
-    docs = kb_service.search(query, top_k=settings.initial_top_k)
+    docs = kb_service.search(query, top_k=settings.initial_top_k, filter_dict=filter_dict)
     
     if not docs:
         return "没有在知识库中找到相关文档。"

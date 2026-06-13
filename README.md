@@ -68,6 +68,15 @@ enterprise_agentic_rag_mvp/
 └── README.md
 ```
 
+## 评测数据集来源 (Dataset)
+
+本项目内置了一个自动拉取真实测试语料的脚本，用于生成和初始化 `app/data/uploads` 目录中的文本数据以及评测集（`eval_dataset.json`）。
+
+- **数据来源**：使用了开源的 [CRUD-RAG](https://github.com/IAAR-Shanghai/CRUD_RAG) 中文评测基准数据集。
+- **提取方式**：通过 `scripts/fetch_crud_rag.py` 脚本自动下载 GitHub 上的 `split_merged.json`，并提取其中的 `questanswer_1doc` 任务。
+- **文件生成**：将提取出的真实新闻或文献文本（`news1`）保存至 `app/data/uploads/` 目录下（作为知识库底库），并将对应的问题映射保存为评测集格式。
+- **目的**：保证项目具备开箱即用的工业级数据底座，方便直接运行回归测试与检索指标（Hit@K, MRR）的评测。
+
 ## 4. 安装与启动
 
 ### 4.1 创建环境

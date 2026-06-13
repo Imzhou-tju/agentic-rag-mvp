@@ -2,7 +2,7 @@
 
 一个适合简历展示的最小可运行项目：支持企业文档上传、知识库索引、Agent 路由问答、摘要/要点提取、引用片段返回。
 
-## 🎯 最终实现目标 (Project Vision & Roadmap)
+## 至少实现目标 (Project Vision & Roadmap)
 
 **知识库Agentic RAG**
 *周期：2025.12 - 2026.03*

@@ -22,6 +22,7 @@ class SimpleVectorStore:
             model=self.settings.embedding_model,
             api_key=self.settings.embedding_api_key,
             base_url=self.settings.embedding_base_url,
+            chunk_size=1,
             check_embedding_ctx_length=False
         )
         
@@ -91,8 +92,21 @@ class SimpleVectorStore:
         if not docs_to_add:
             return 0
             
-        self.vector_store.add_documents(docs_to_add)
-        return len(docs_to_add)
+        # Debug and filter
+        valid_docs = []
+        for doc in docs_to_add:
+            if not doc.page_content.strip():
+                print(f"Skipping empty chunk in {doc.metadata.get('document_name')}")
+                continue
+            if len(doc.page_content) > 512:
+                print(f"Warning: chunk too long! Length: {len(doc.page_content)}")
+            valid_docs.append(doc)
+            
+        if not valid_docs:
+            return 0
+            
+        self.vector_store.add_documents(valid_docs)
+        return len(valid_docs)
 
     def add_documents_from_folder(self, folder: str) -> int:
         from app.rag.loader import DocumentLoader, SUPPORTED_EXTENSIONS

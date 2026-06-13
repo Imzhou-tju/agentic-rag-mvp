@@ -43,12 +43,9 @@ def evaluate(disable_rerank: bool):
         question = item["question"]
         expected_doc = item["expected_document_name"]
         
-        # 1. Analyze query to get campus filter
-        analysis = analyzer.analyze(question)
+        # 1. No campus filter for open source benchmark
         filter_dict = None
-        if analysis and analysis.campus:
-            filter_dict = {"campus": analysis.campus}
-            
+        
         # 2. Retrieve initial top_k (e.g., 15)
         # If no_rerank is true, we just retrieve the final top_k (4) directly using Embedding
         from app.core.config import get_settings

@@ -12,7 +12,7 @@ def normalize_text(text: str) -> str:
     return text.strip()
 
 
-def chunk_text(text: str, chunk_size: int = 700, chunk_overlap: int = 120) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 250, chunk_overlap: int = 50) -> List[str]:
     text = normalize_text(text)
     if len(text) <= chunk_size:
         return [text]

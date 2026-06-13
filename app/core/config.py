@@ -32,8 +32,8 @@ class Settings(BaseSettings):
 
     initial_top_k: int = 15
     top_k: int = 4
-    chunk_size: int = 700
-    chunk_overlap: int = 120
+    chunk_size: int = 250
+    chunk_overlap: int = 50
 
     @property
     def cors_origins(self) -> List[str]:

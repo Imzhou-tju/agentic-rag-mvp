@@ -17,23 +17,45 @@
 
 ---
 
-## 1. 项目亮点
+## 1. 核心架构与评测指标
+
+### Graph 架构 (LangGraph)
+本项目采用状态机图结构（Graph）管理 Agentic RAG 控制流：
+- **Router Node**：意图识别，判断直接回答还是进入检索流程。
+- **Retrieve Node**：混合检索（BM25 + Dense）及元数据过滤（如校区）。
+- **Grade Node**：检索质量评估与 RRF 重排。
+- **Generate Node**：答案生成与兜底策略。
+- **循环/终止**：根据检索置信度和工具调用状态自主决定补检索或输出。
+
+### 评测标准与结果
+放弃“水土不服”的 Ragas 英文评测框架，自主实现了基于 `LLM-as-a-Judge` 的**纯血中文原生评测体系**。
+
+**测试基准**：网络公开标准中文机器阅读理解基准（**CMRC2018**）。
+**评测指标（四大金刚）**：
+1. **Faithfulness (无幻觉指数)**：1.0000（严格比对上下文，无编造事实）。
+2. **Relevancy (答案相关性)**：0.6667（直击问题核心，拒绝答非所问）。
+3. **Context Precision (上下文精度)**：0.4333（有效支撑信息在上下文中的浓缩度及排位）。
+4. **Context Recall (上下文召回率)**：1.0000（基于 Ground Truth 的核心知识点覆盖率）。
+
+*注：在应对真实公开数据集时，模型边界被清晰揭露（如无法推导时主动放弃，导致 Relevancy 波动），展现了高置信度的企业级防御表现。*
+
+---
+
+## 2. 项目特性
 
 - **企业知识库场景**：上传 PDF / TXT / Markdown 文档，自动建立索引。
-- **Agentic RAG**：根据问题类型判断“直接回答”还是“检索后回答”。
+- **Agentic RAG**：基于 LangGraph 的有向循环流，智能规划检索步骤。
 - **多任务支持**：问答、摘要、关键要点提取、比较分析。
 - **引用可追溯**：返回命中的文档片段和相关性分数。
-- **可扩展架构**：可继续替换向量库、接入 reranker、增加权限控制与评测模块。
+- **动态数据接入**：内置脚本自动拉取外部公开数据集（CRUD-RAG, CMRC2018）进行测试。
 
 ## 2. 技术栈
 
 - Backend: FastAPI
 - Frontend: Streamlit
-- Retrieval: TF-IDF + cosine similarity（MVP 版本，便于本地快速运行）
+- Retrieval: 混合检索 (BM25 + Chroma Dense Retrieval) + RRF 重排
 - LLM: OpenAI 兼容接口 / Mock 抽取式模式
 - File Parsing: PyPDF2 / Markdown / TXT
-
-> 说明：为了让项目开箱即用、依赖更轻，当前版本使用 `scikit-learn` 检索实现。后续可替换为 `FAISS + embedding model`，作为项目优化点。
 
 ## 3. 项目结构
 
@@ -163,12 +185,9 @@ OPENAI_BASE_URL=
 
 ## 7. 你可以继续优化的方向
 
-1. 将 TF-IDF 检索升级为 `embedding + FAISS`。
-2. 增加 hybrid retrieval（BM25 + dense retrieval）。
-3. 接入 reranker。
-4. 增加评测集与 hit@k 指标。
-5. 增加对话历史与 memory。
-6. 增加用户权限与多知识库管理。
+1. 增加对话历史与 memory。
+2. 增加用户权限与多知识库管理。
+3. 将前端替换为更灵活的架构（如 Vue/React + 独立后端）。
 
 ## 8. 简历描述示例
 

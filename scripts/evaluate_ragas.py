@@ -1,11 +1,19 @@
 import sys
 import os
 
+# --- Monkey Patch for Ragas compatibility with latest langchain ---
+class DummyVertexAI:
+    pass
+class DummyModule:
+    ChatVertexAI = DummyVertexAI
+
+sys.modules['langchain_community.chat_models.vertexai'] = DummyModule()
+# ------------------------------------------------------------------
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from app.agent.graph import app_graph, kb_service
-from app.agent.llm import get_llm
+from app.agent.graph import app_graph, kb_service, llm
 from ragas import evaluate
 from ragas.metrics import faithfulness, answer_relevancy, context_precision, context_recall
 from datasets import Dataset
@@ -92,7 +100,6 @@ def evaluate_with_ragas():
     
     dataset = Dataset.from_dict(data)
     
-    llm = get_llm()
     embeddings = kb_service.store.embeddings
     
     # 包装为 Ragas 能识别的对象

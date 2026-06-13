@@ -17,14 +17,14 @@ def evaluate(disable_rerank: bool):
     kb_service = KnowledgeBaseService()
     analyzer = QueryAnalyzer()
     
-    # Rebuild index first to ensure we have the mock documents
+    # Rebuild index first to ensure we have the documents
     print("Rebuilding index with current documents in app/data/uploads/...")
     indexed_count = kb_service.rebuild_index()
     print(f"Indexed {indexed_count} chunks.")
     
     dataset_path = Path("app/data/eval_dataset.json")
     if not dataset_path.exists():
-        print("Evaluation dataset not found. Please run generate_mock_data.py first.")
+        print("Evaluation dataset not found. Please run bootstrap_demo_data.py first.")
         return
         
     with open(dataset_path, "r", encoding="utf-8") as f:

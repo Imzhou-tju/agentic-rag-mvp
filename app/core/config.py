@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     upload_dir: str = 'app/data/uploads'
     index_dir: str = 'app/data/index'
 
-    llm_mode: str = 'mock'  # mock or openai
+    llm_mode: str = 'openai'
     llm_model: str = 'gpt-4o-mini'
     test_llm_models: str = '' # comma separated list of models for multi-model testing
     openai_api_key: str = ''

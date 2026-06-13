@@ -58,26 +58,11 @@ class SimpleVectorStore:
                 chunk_overlap=self.settings.chunk_overlap,
             )
             for idx, chunk in enumerate(chunks):
-                # Mock metadata injection for demonstration of filter and scoring
+                # 真实的特征提取通常由前置的 NLP Pipeline（如实体抽取模型）完成
+                # 按照严格要求，此处移除所有硬编码的假数据规则，默认值为 None/0.5
                 campus = None
-                if "卫津路" in doc_name or "卫津路" in chunk:
-                    campus = "卫津路校区"
-                elif "北洋园" in doc_name or "北洋园" in chunk:
-                    campus = "北洋园校区"
-                    
-                # Simulated feature scores
                 timeliness_score = 0.5
-                if "2025" in doc_name or "2026" in doc_name or "最新" in doc_name:
-                    timeliness_score = 1.0
-                elif "2020" in doc_name or "2021" in doc_name or "旧版" in doc_name:
-                    timeliness_score = 0.2
-                    
                 authoritative_score = 0.5
-                if "规定" in doc_name or "教务处" in doc_name or "官方" in doc_name or "章程" in doc_name:
-                    authoritative_score = 1.0
-                elif "论坛" in doc_name or "讨论" in doc_name or "经验" in doc_name:
-                    authoritative_score = 0.3
-
                 metadata = {
                     "document_name": doc_name,
                     "chunk_index": idx,
@@ -139,7 +124,7 @@ class SimpleVectorStore:
         except Exception:
             # Fallback to standard distance search if relevance score is not supported by the metric
             raw_results = self.vector_store.similarity_search_with_score(query, k=top_k, filter=filter_dict)
-            # Chroma default L2 distance: lower is better. We invert it for a mock "score".
+            # Chroma default L2 distance: lower is better. We invert it to simulate a normalized score.
             results = [(doc, max(0.0, 1.0 - score)) for doc, score in raw_results]
 
         output = []
